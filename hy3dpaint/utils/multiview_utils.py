@@ -54,7 +54,7 @@ class multiviewDiffusionNet:
         # Fix for: “Torch not compiled with CUDA enabled”
         # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.device = torch.device("xpu:1" if torch.xpu.is_available() else "cpu")
+        self.device = torch.device("xpu:1" if torch.xpu.is_available() and torch.xpu.device_count() > 1 else "cpu")
         
         
         self.pipeline = pipeline.to(self.device)

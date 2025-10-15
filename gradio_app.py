@@ -777,6 +777,16 @@ if __name__ == '__main__':
 
     SUPPORTED_FORMATS = ['glb', 'obj', 'ply', 'stl']
 
+    # try to use 2 gpus, 1 for shape gen 1 for texture pipeline
+    if args.device == "xpu" and torch.xpu.is_available():
+        num_xpu = torch.xpu.device_count()
+        device_shape = torch.device("xpu:0")
+        device_tex = torch.device("xpu:1" if num_xpu > 1 else "xpu:0")
+    else:
+        # fallback for non-XPU mode
+        device_shape = torch.device(args.device)
+        device_tex = torch.device(args.device)
+
     HAS_TEXTUREGEN = False
     if not args.disable_tex:
         try:
@@ -796,7 +806,7 @@ if __name__ == '__main__':
             #     texgen_worker.enable_model_cpu_offload()
 
             from hy3dpaint.textureGenPipeline import Hunyuan3DPaintPipeline, Hunyuan3DPaintConfig
-            conf = Hunyuan3DPaintConfig(max_num_view=8, resolution=768)
+            conf = Hunyuan3DPaintConfig(max_num_view=8, resolution=768, device=device_tex)
             conf.realesrgan_ckpt_path = "hy3dpaint/ckpt/RealESRGAN_x4plus.pth"
             conf.multiview_cfg_path = "hy3dpaint/cfgs/hunyuan-paint-pbr.yaml"
             conf.custom_pipeline = "hy3dpaint/hunyuanpaintpbr"
@@ -836,7 +846,7 @@ if __name__ == '__main__':
         args.model_path,
         subfolder=args.subfolder,
         use_safetensors=False,
-        device=args.device,
+        device=device_shape,
     )
     if args.enable_flashvdm:
         mc_algo = 'mc' if args.device in ['cpu', 'mps'] else args.mc_algo
@@ -863,4 +873,3 @@ if __name__ == '__main__':
     demo = build_app()
     app = gr.mount_gradio_app(app, demo, path="/")
     uvicorn.run(app, host=args.host, port=args.port)
-q
