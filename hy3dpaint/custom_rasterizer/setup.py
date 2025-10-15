@@ -17,13 +17,13 @@ import torch
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension, CppExtension
 
 # build custom rasterizer
-
-custom_rasterizer_module = CUDAExtension(
+# CPP Extension tell PyTorch how to compile these file using C++ compiler
+custom_rasterizer_module = CppExtension(
     "custom_rasterizer_kernel",
     [
         "lib/custom_rasterizer_kernel/rasterizer.cpp",
-        "lib/custom_rasterizer_kernel/grid_neighbor.cpp",
-        "lib/custom_rasterizer_kernel/rasterizer_gpu.cu",
+        "lib/custom_rasterizer_kernel/grid_neighbor.cpp"
+        # "lib/custom_rasterizer_kernel/rasterizer_gpu.cu",
     ],
 )
 

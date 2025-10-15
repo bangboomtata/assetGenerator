@@ -122,6 +122,16 @@ std::vector<torch::Tensor> rasterize_image_cpu(torch::Tensor V, torch::Tensor F,
     return {findices, barycentric};
 }
 
+#ifndef WITH_CUDA
+std::vector<torch::Tensor> rasterize_image_gpu(
+    torch::Tensor V, torch::Tensor F, torch::Tensor D,
+    int width, int height, float occlusion_truncation, int use_depth_prior)
+{
+    TORCH_CHECK(false, "rasterize_image_gpu is only available when built with CUDA.");
+    return {};
+}
+#endif
+
 std::vector<torch::Tensor> rasterize_image(torch::Tensor V, torch::Tensor F, torch::Tensor D,
     int width, int height, float occlusion_truncation, int use_depth_prior)
 {

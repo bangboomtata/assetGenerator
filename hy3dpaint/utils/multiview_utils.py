@@ -50,6 +50,13 @@ class multiviewDiffusionNet:
         pipeline.set_progress_bar_config(disable=True)
         pipeline.eval()
         setattr(pipeline, "view_size", cfg.model.params.get("view_size", 320))
+        
+        # Fix for: “Torch not compiled with CUDA enabled”
+        # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        self.device = torch.device("xpu:1" if torch.xpu.is_available() else "cpu")
+        
+        
         self.pipeline = pipeline.to(self.device)
 
         if hasattr(self.pipeline.unet, "use_dino") and self.pipeline.unet.use_dino:
