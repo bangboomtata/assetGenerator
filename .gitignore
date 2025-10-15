@@ -131,6 +131,8 @@ celerybeat.pid
 # Environments
 .env
 .venv
+.venv310
+save_dir/
 env/
 venv/
 ENV/
