@@ -1,7 +1,11 @@
 #ifndef RASTERIZER_H_
 #define RASTERIZER_H_
 
+#include <sycl/sycl.hpp>
+#include <dpct/dpct.hpp>
 #include <torch/extension.h>
+#include <sycl/sycl.hpp>
+#include <dpct/dpct.hpp>
 #include <vector>
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -9,8 +13,8 @@
 #define INT64 unsigned long long
 #define MAXINT 2147483647
 
-#ifdef __CUDACC__
-#define HOST_DEVICE __host__ __device__
+#ifdef SYCL_LANGUAGE_VERSION
+#define HOST_DEVICE 
 #else
 #define HOST_DEVICE
 #endif
