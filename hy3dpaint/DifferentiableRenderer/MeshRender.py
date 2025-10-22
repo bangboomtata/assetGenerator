@@ -13,6 +13,7 @@ from .camera_utils import (
     get_orthographic_projection_matrix,
     get_perspective_projection_matrix,
 )
+from hy3dpaint.custom_rasterizer.custom_rasterizer.render import *
 
 try:
     from .mesh_utils import load_mesh, save_mesh
@@ -520,7 +521,7 @@ class MeshRender:
             if tri.dtype == torch.int64:
                 tri = tri.to(torch.int32)
 
-            findices, barycentric = self.raster_rasterize(pos, tri, resolution)
+            findices, barycentric = rasterize(pos, tri, resolution)
             rast_out = torch.cat((barycentric, findices.unsqueeze(-1)), dim=-1)
             rast_out = rast_out.unsqueeze(0)
         else:
@@ -547,7 +548,7 @@ class MeshRender:
             findices = rast_out[0, ..., -1]
             if uv.dim() == 2:
                 uv = uv.unsqueeze(0)
-            textc = self.raster_interpolate(uv, findices, barycentric, uv_idx)
+            textc = interpolate(uv, findices, barycentric, uv_idx)
         else:
             raise f"No raster named {self.raster_mode}"
 
