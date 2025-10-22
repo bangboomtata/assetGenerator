@@ -37,18 +37,92 @@ class multiviewDiffusionNet:
         pipeline.eval()
         setattr(pipeline, "view_size", cfg.model.params.get("view_size", 320))
         
-        # Fix for: “Torch not compiled with CUDA enabled”
-        # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
         self.device = torch.device("xpu:1" if torch.xpu.is_available() and torch.xpu.device_count() > 1 else "cpu")
         
-        
         self.pipeline = pipeline.to(self.device)
+        
+        # Patch the pipeline's convert_pil_list_to_tensor function to use our device
+        self._patch_pipeline_device()
 
         if hasattr(self.pipeline.unet, "use_dino") and self.pipeline.unet.use_dino:
             from hunyuanpaintpbr.unet.modules import Dino_v2
             self.dino_v2 = Dino_v2(config.dino_ckpt_path).to(torch.float16)
             self.dino_v2 = self.dino_v2.to(self.device)
+
+    def _patch_pipeline_device(self):
+        """Patch the pipeline to use the correct device instead of hardcoded 'cuda'"""
+        print("\n" + "="*80)
+        print("DEBUG: Starting _patch_pipeline_device()")
+        print(f"DEBUG: Target device = {self.device}")
+        print(f"DEBUG: Found issue: Line 245 in pipeline.py has hardcoded .to('cuda')")
+        print("="*80)
+        
+        import sys
+        device = self.device
+        
+        # Get the pipeline file path
+        module_name = self.pipeline.__class__.__module__
+        pipeline_module = sys.modules[module_name]
+        pipeline_file = pipeline_module.__file__
+        print(f"DEBUG: Pipeline file: {pipeline_file}")
+        
+        # Wrap the __call__ method to intercept cuda calls
+        print("DEBUG: Wrapping pipeline.__call__ to intercept .to('cuda') calls...")
+        original_call = self.pipeline.__call__
+        
+        # Counter for debugging
+        cuda_intercept_count = [0]
+        
+        def patched_call(*args, **kwargs):
+            print(f"\nDEBUG: ►►► Pipeline.__call__ invoked ◄◄◄")
+            
+            # Temporarily replace torch.Tensor.to to intercept cuda calls
+            original_to = torch.Tensor.to
+            
+            def patched_to(self_tensor, *to_args, **to_kwargs):
+                # Check if trying to move to 'cuda'
+                if len(to_args) > 0 and to_args[0] == "cuda":
+                    cuda_intercept_count[0] += 1
+                    print(f"DEBUG: ✓✓✓ INTERCEPTED .to('cuda') call #{cuda_intercept_count[0]}!")
+                    print(f"DEBUG:     Tensor shape: {self_tensor.shape}, dtype: {self_tensor.dtype}")
+                    print(f"DEBUG:     Redirecting from 'cuda' → '{device}'")
+                    return original_to(self_tensor, device, *to_args[1:], **to_kwargs)
+                elif 'device' in to_kwargs and to_kwargs['device'] == "cuda":
+                    cuda_intercept_count[0] += 1
+                    print(f"DEBUG: ✓✓✓ INTERCEPTED .to(device='cuda') call #{cuda_intercept_count[0]}!")
+                    print(f"DEBUG:     Redirecting from 'cuda' → '{device}'")
+                    to_kwargs['device'] = device
+                    return original_to(self_tensor, *to_args, **to_kwargs)
+                else:
+                    # Normal call, not to cuda
+                    return original_to(self_tensor, *to_args, **to_kwargs)
+            
+            # Monkey-patch torch.Tensor.to temporarily
+            torch.Tensor.to = patched_to
+            
+            try:
+                print("DEBUG: Executing original pipeline call...")
+                result = original_call(*args, **kwargs)
+                print(f"DEBUG: ✓✓✓ Pipeline call completed successfully!")
+                print(f"DEBUG: Total cuda calls intercepted: {cuda_intercept_count[0]}")
+                return result
+            except Exception as e:
+                print(f"DEBUG: ✗✗✗ Pipeline call failed with error: {e}")
+                import traceback
+                traceback.print_exc()
+                raise
+            finally:
+                # Restore original method
+                torch.Tensor.to = original_to
+                print("DEBUG: Restored original torch.Tensor.to method\n")
+        
+        self.pipeline.__call__ = patched_call
+        print("DEBUG: ✓✓✓ Successfully wrapped pipeline.__call__ method")
+        print("DEBUG: The wrapper will intercept all .to('cuda') calls during execution")
+        
+        print("="*80)
+        print("DEBUG: Patch setup complete!")
+        print("="*80 + "\n")
 
     def seed_everything(self, seed):
         random.seed(seed)

@@ -1,17 +1,3 @@
-# Hunyuan 3D is licensed under the TENCENT HUNYUAN NON-COMMERCIAL LICENSE AGREEMENT
-# except for the third-party components listed below.
-# Hunyuan 3D does not impose any additional limitations beyond what is outlined
-# in the repsective licenses of these third-party components.
-# Users must comply with all terms and conditions of original licenses of these third-party
-# components and must ensure that the usage of the third party components adheres to
-# all relevant laws and regulations.
-
-# For avoidance of doubts, Hunyuan 3D means the large language models and
-# their software and algorithms, including trained model weights, parameters (including
-# optimizer states), machine-learning model code, inference-enabling code, training-enabling code,
-# fine-tuning enabling code and other elements of the foregoing made publicly available
-# by Tencent in accordance with TENCENT HUNYUAN COMMUNITY LICENSE AGREEMENT.
-
 import os
 import torch
 import copy
@@ -27,6 +13,7 @@ from utils.image_super_utils import imageSuperNet
 from utils.uvwrap_utils import mesh_uv_wrap
 from DifferentiableRenderer.mesh_utils import convert_obj_to_glb
 import warnings
+import intel_extension_for_pytorch as ipex
 
 warnings.filterwarnings("ignore")
 from diffusers.utils import logging as diffusers_logging
@@ -36,7 +23,7 @@ diffusers_logging.set_verbosity(50)
 
 class Hunyuan3DPaintConfig:
     def __init__(self, max_num_view, resolution, device = None):
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = device or ("xpu:1" if torch.xpu.is_available() else "cpu")
         self.multiview_cfg_path = "hy3dpaint/cfgs/hunyuan-paint-pbr.yaml"
         self.custom_pipeline = "hunyuanpaintpbr"
         self.multiview_pretrained_path = "tencent/Hunyuan3D-2.1"
@@ -83,7 +70,7 @@ class Hunyuan3DPaintPipeline:
         self.load_models()
 
     def load_models(self):
-        torch.cuda.empty_cache()
+        # torch.cuda.empty_cache()
         self.models["super_model"] = imageSuperNet(self.config)
         self.models["multiview_model"] = multiviewDiffusionNet(self.config)
         print("Models Loaded.")
