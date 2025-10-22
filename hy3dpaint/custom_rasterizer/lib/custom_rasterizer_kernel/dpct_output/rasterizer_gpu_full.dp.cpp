@@ -3,6 +3,7 @@
 #include "rasterizer.h"
 #include <cmath>
 #include <cstdint>
+#include <torch/extension.h>
 
 using CUSTOM_INT64 = int64_t;
 

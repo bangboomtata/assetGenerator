@@ -1,17 +1,3 @@
-# Hunyuan 3D is licensed under the TENCENT HUNYUAN NON-COMMERCIAL LICENSE AGREEMENT
-# except for the third-party components listed below.
-# Hunyuan 3D does not impose any additional limitations beyond what is outlined
-# in the repsective licenses of these third-party components.
-# Users must comply with all terms and conditions of original licenses of these third-party
-# components and must ensure that the usage of the third party components adheres to
-# all relevant laws and regulations.
-
-# For avoidance of doubts, Hunyuan 3D means the large language models and
-# their software and algorithms, including trained model weights, parameters (including
-# optimizer states), machine-learning model code, inference-enabling code, training-enabling code,
-# fine-tuning enabling code and other elements of the foregoing made publicly available
-# by Tencent in accordance with TENCENT HUNYUAN COMMUNITY LICENSE AGREEMENT.
-
 import cv2
 import torch
 import trimesh
@@ -534,7 +520,7 @@ class MeshRender:
             if tri.dtype == torch.int64:
                 tri = tri.to(torch.int32)
 
-            findices, barycentric = self.raster.rasterize(pos, tri, resolution)
+            findices, barycentric = self.raster_rasterize(pos, tri, resolution)
             rast_out = torch.cat((barycentric, findices.unsqueeze(-1)), dim=-1)
             rast_out = rast_out.unsqueeze(0)
         else:
@@ -561,7 +547,7 @@ class MeshRender:
             findices = rast_out[0, ..., -1]
             if uv.dim() == 2:
                 uv = uv.unsqueeze(0)
-            textc = self.raster.interpolate(uv, findices, barycentric, uv_idx)
+            textc = self.raster_interpolate(uv, findices, barycentric, uv_idx)
         else:
             raise f"No raster named {self.raster_mode}"
 
