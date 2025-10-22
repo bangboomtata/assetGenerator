@@ -1,22 +1,35 @@
 #ifndef RASTERIZER_H_
 #define RASTERIZER_H_
 
-#include <sycl/sycl.hpp>
-#include <dpct/dpct.hpp>
 #include <torch/extension.h>
-#include <sycl/sycl.hpp>
-#include <dpct/dpct.hpp>
 #include <vector>
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAContext.h>
 
-#define INT64 unsigned long long
+// Remove CUDA-specific includes when not compiling with CUDA
+#ifndef __SYCL_DEVICE_ONLY__
+    #ifndef __CUDACC__
+        // For CPU/host compilation
+    #else
+        #include <ATen/cuda/CUDAContext.h>
+    #endif
+#endif
+
+// Use int64_t instead of unsigned long long for better compatibility
+#ifndef CUSTOM_INT64
+using CUSTOM_INT64 = int64_t;
+#endif
+
+#ifndef MAXINT
 #define MAXINT 2147483647
+#endif
 
-#ifdef SYCL_LANGUAGE_VERSION
-#define HOST_DEVICE 
+// Define HOST_DEVICE for different compilation targets
+#ifdef __CUDACC__
+    #define HOST_DEVICE __host__ __device__
+#elif defined(__SYCL_DEVICE_ONLY__)
+    #define HOST_DEVICE
 #else
-#define HOST_DEVICE
+    #define HOST_DEVICE inline
 #endif
 
 HOST_DEVICE inline float calculateSignedArea2(float* a, float* b, float* c) {
@@ -30,26 +43,29 @@ HOST_DEVICE inline void calculateBarycentricCoordinate(float* a, float* b, float
     float gamma_tri = calculateSignedArea2(a, b, p);
     float area = calculateSignedArea2(a, b, c);
     if (area == 0) {
-        barycentric[0] = barycentric[1] = barycentric[2] = -1.0;
+        barycentric[0] = barycentric[1] = barycentric[2] = -1.0f;
         return;
     }
-    float tri_inv = 1.0 / area;
-    barycentric[0] = 1.0 - (beta_tri + gamma_tri) * tri_inv;
+    float tri_inv = 1.0f / area;
+    barycentric[0] = 1.0f - (beta_tri + gamma_tri) * tri_inv;
     barycentric[1] = beta_tri * tri_inv;
     barycentric[2] = gamma_tri * tri_inv;
 }
 
 HOST_DEVICE inline bool isBarycentricCoordInBounds(float* barycentricCoord) {
-    return barycentricCoord[0] >= 0.0 && barycentricCoord[0] <= 1.0 &&
-           barycentricCoord[1] >= 0.0 && barycentricCoord[1] <= 1.0 &&
-           barycentricCoord[2] >= 0.0 && barycentricCoord[2] <= 1.0;
+    return barycentricCoord[0] >= 0.0f && barycentricCoord[0] <= 1.0f &&
+           barycentricCoord[1] >= 0.0f && barycentricCoord[1] <= 1.0f &&
+           barycentricCoord[2] >= 0.0f && barycentricCoord[2] <= 1.0f;
 }
 
 // Forward declarations
 std::vector<torch::Tensor> rasterize_image_gpu(torch::Tensor V, torch::Tensor F, torch::Tensor D,
     int width, int height, float occlusion_truncation, int use_depth_prior);
 
-std::vector<std::vector<torch::Tensor>> build_hierarchy(std::vector<torch::Tensor> view_layer_positions, std::vector<torch::Tensor> view_layer_normals, int num_level, int resolution);
+std::vector<std::vector<torch::Tensor>> build_hierarchy(
+    std::vector<torch::Tensor> view_layer_positions, 
+    std::vector<torch::Tensor> view_layer_normals, 
+    int num_level, int resolution);
 
 std::vector<std::vector<torch::Tensor>> build_hierarchy_with_feat(
     std::vector<torch::Tensor> view_layer_positions,
@@ -57,4 +73,4 @@ std::vector<std::vector<torch::Tensor>> build_hierarchy_with_feat(
     std::vector<torch::Tensor> view_layer_feats,
     int num_level, int resolution);
 
-#endif
+#endif // RASTERIZER_H_

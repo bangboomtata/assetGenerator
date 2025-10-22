@@ -12,7 +12,7 @@ void rasterizeTriangleCPU(int idx, float* vt0, float* vt1, float* vt2, int width
         for (int py = y_min; py < y_max + 1; ++py) {
             if (py < 0 || py >= height)
                 continue;
-            float vt[2] = {px + 0.5, py + 0.5};
+            double vt[2] = {px + 0.5, py + 0.5};
             float baryCentricCoordinate[3];
             calculateBarycentricCoordinate(vt0, vt1, vt2, vt, baryCentricCoordinate);
             if (isBarycentricCoordInBounds(baryCentricCoordinate)) {

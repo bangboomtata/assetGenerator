@@ -1,40 +1,54 @@
-# Hunyuan 3D is licensed under the TENCENT HUNYUAN NON-COMMERCIAL LICENSE AGREEMENT
-# except for the third-party components listed below.
-# Hunyuan 3D does not impose any additional limitations beyond what is outlined
-# in the repsective licenses of these third-party components.
-# Users must comply with all terms and conditions of original licenses of these third-party
-# components and must ensure that the usage of the third party components adheres to
-# all relevant laws and regulations.
+from setuptools import setup
+from torch.utils.cpp_extension import BuildExtension, CppExtension
+import os
 
-# For avoidance of doubts, Hunyuan 3D means the large language models and
-# their software and algorithms, including trained model weights, parameters (including
-# optimizer states), machine-learning model code, inference-enabling code, training-enabling code,
-# fine-tuning enabling code and other elements of the foregoing made publicly available
-# by Tencent in accordance with TENCENT HUNYUAN COMMUNITY LICENSE AGREEMENT.
+print("=" * 80)
+print("Building Intel XPU SYCL rasterizer (GPU only, with grid_neighbor)...")
+print("=" * 80)
 
-from setuptools import setup, find_packages
-import torch
-from torch.utils.cpp_extension import BuildExtension, CUDAExtension, CppExtension
+# Force Intel oneAPI compilers
+os.environ["CXX"] = "icpx"
+os.environ["CC"] = "icx"
 
-# build custom rasterizer
-# CPP Extension tell PyTorch how to compile these file using C++ compiler
-custom_rasterizer_module = CppExtension(
-    "custom_rasterizer_kernel",
-    [
-        "lib/custom_rasterizer_kernel/rasterizer.cpp",
-        "lib/custom_rasterizer_kernel/grid_neighbor.cpp"
-        # "lib/custom_rasterizer_kernel/rasterizer_gpu.cu",
-    ],
-)
+# Source files for SYCL rasterizer
+sources = [
+    "lib/custom_rasterizer_kernel/dpct_output/rasterizer_gpu_full.dp.cpp",
+    "lib/custom_rasterizer_kernel/grid_neighbor.cpp",
+]
 
+# Remove irrelevant GCC warnings & add SYCL/deprecation-related flags
+flags_to_remove = [
+    "-Wno-unused-but-set-variable",
+    "-Wno-maybe-uninitialized",
+]
+
+extra_compile_args = {
+    "cxx": [
+        "-O2",
+        "-std=c++17",
+        "-fsycl",
+        "-DUSE_SYCL",
+        "-Wno-deprecated-declarations",   # suppress deprecated warnings
+    ]
+}
+
+# Remove unwanted flags if they exist
+for flag in flags_to_remove:
+    if flag in extra_compile_args["cxx"]:
+        extra_compile_args["cxx"].remove(flag)
+
+extra_link_args = ["-fsycl"]
+
+# Build setup
 setup(
-    packages=find_packages(),
-    version="0.1",
-    name="custom_rasterizer",
-    include_package_data=True,
-    package_dir={"": "."},
+    name="custom_rasterizer_kernel",
     ext_modules=[
-        custom_rasterizer_module,
+        CppExtension(
+            name="custom_rasterizer_kernel",
+            sources=sources,
+            extra_compile_args=extra_compile_args["cxx"],
+            extra_link_args=extra_link_args,
+        )
     ],
     cmdclass={"build_ext": BuildExtension},
 )

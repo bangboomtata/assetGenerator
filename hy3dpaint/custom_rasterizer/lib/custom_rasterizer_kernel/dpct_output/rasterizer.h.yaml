@@ -11,15 +11,6 @@ Replacements:
     NewHostVarName:  ''
     BlockLevelFormatFlag: false
   - FilePath:        '/home/brian-bong/Hunyuan3D-2.1/hy3dpaint/custom_rasterizer/lib/custom_rasterizer_kernel/rasterizer.h'
-    Offset:          74
-    Length:          0
-    ReplacementText: "#include <sycl/sycl.hpp>\n#include <dpct/dpct.hpp>\n"
-    ConstantFlag:    ''
-    ConstantOffset:  0
-    InitStr:         ''
-    NewHostVarName:  ''
-    BlockLevelFormatFlag: false
-  - FilePath:        '/home/brian-bong/Hunyuan3D-2.1/hy3dpaint/custom_rasterizer/lib/custom_rasterizer_kernel/rasterizer.h'
     Offset:          218
     Length:          10
     ReplacementText: SYCL_LANGUAGE_VERSION
