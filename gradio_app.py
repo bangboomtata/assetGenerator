@@ -1,19 +1,3 @@
-# Hunyuan 3D is licensed under the TENCENT HUNYUAN NON-COMMERCIAL LICENSE AGREEMENT
-# except for the third-party components listed below.
-# Hunyuan 3D does not impose any additional limitations beyond what is outlined
-# in the repsective licenses of these third-party components.
-# Users must comply with all terms and conditions of original licenses of these third-party
-# components and must ensure that the usage of the third party components adheres to
-# all relevant laws and regulations.
-
-# For avoidance of doubts, Hunyuan 3D means the large language models and
-# their software and algorithms, including trained model weights, parameters (including
-# optimizer states), machine-learning model code, inference-enabling code, training-enabling code,
-# fine-tuning enabling code and other elements of the foregoing made publicly available
-# by Tencent in accordance with TENCENT HUNYUAN COMMUNITY LICENSE AGREEMENT.
-
-# Apply torchvision compatibility fix before other imports
-
 import sys
 sys.path.insert(0, './hy3dshape')
 sys.path.insert(0, './hy3dpaint')
@@ -213,6 +197,56 @@ height="{height}" width="100%" frameborder="0"></iframe>'
         </div>
     """
 
+
+def preview_background_removal(image, check_box_rembg):
+    """Preview what the image looks like after background removal"""
+    if image is None:
+        raise gr.Error("Please upload an image first.")
+    
+    print("="*60)
+    print("PREVIEW: Starting background removal preview...")
+    print(f"PREVIEW: Input image mode={image.mode}, size={image.size}")
+    print(f"PREVIEW: Remove background enabled={check_box_rembg}")
+    
+    if not check_box_rembg:
+        print("PREVIEW: Background removal is disabled")
+        return gr.update(visible=True, value=image), "⚠️ Background removal is disabled. Enable it in Advanced Options."
+    
+    try:
+        # Convert to RGB if needed
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        
+        # Remove background
+        processed = rmbg_worker(image)
+        
+        print(f"PREVIEW: Output image mode={processed.mode}, size={processed.size}")
+        
+        # Check if it worked
+        if processed.mode == 'RGBA':
+            alpha = np.array(processed)[:, :, 3]
+            transparent_pixels = np.sum(alpha < 10)
+            total_pixels = alpha.size
+            transparency_ratio = transparent_pixels / total_pixels * 100
+            print(f"PREVIEW: Transparency: {transparency_ratio:.1f}%")
+            
+            if transparency_ratio < 1:
+                message = "⚠️ Warning: Background removal may not have worked well (very few transparent pixels)"
+            else:
+                message = f"✓ Background removed successfully! ({transparency_ratio:.1f}% transparent pixels)"
+        else:
+            message = "⚠️ Warning: Output is not RGBA format"
+            
+        print("="*60)
+        return gr.update(visible=True, value=processed), message
+        
+    except Exception as e:
+        print(f"PREVIEW ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        return gr.update(visible=True, value=image), f"❌ Error: {str(e)}"
+
+
 @spaces.GPU(duration=60)
 def _gen_shape(
     caption=None,
@@ -290,6 +324,13 @@ def _gen_shape(
             start_time = time.time()
             image = rmbg_worker(image.convert('RGB'))
             time_meta['remove background'] = time.time() - start_time
+            
+            # Debug output
+            debug_path = os.path.join(save_folder, 'after_rembg.png')
+            image.save(debug_path)
+            print(f"✓ Background removal completed")
+            print(f"✓ Saved debug image to: {debug_path}")
+            print(f"✓ Image mode: {image.mode}, size: {image.size}")
 
     # remove disk io to make responding faster, uncomment at your will.
     # image.save(os.path.join(save_folder, 'rembg.png'))
@@ -317,9 +358,17 @@ def _gen_shape(
 
     stats['number_of_faces'] = mesh.faces.shape[0]
     stats['number_of_vertices'] = mesh.vertices.shape[0]
-
     stats['time'] = time_meta
-    main_image = image if not MV_MODE else image['front']
+    
+    # Get the main image to display (front view for MV mode, or the single image)
+    main_image = image if not MV_MODE else image.get('front', list(image.values())[0])
+    
+    # Save processed image for debugging
+    debug_path = os.path.join(save_folder, 'processed_input.png')
+    main_image.save(debug_path)
+    print(f"Saved processed image to: {debug_path}")
+    print(f"Processed image mode: {main_image.mode}, size: {main_image.size}")
+    
     return mesh, main_image, save_folder, stats, seed
 
 @spaces.GPU(duration=60)
@@ -339,7 +388,7 @@ def generation_all(
     randomize_seed: bool = False,
 ):
     start_time_0 = time.time()
-    mesh, image, save_folder, stats, seed = _gen_shape(
+    mesh, processed_img, save_folder, stats, seed = _gen_shape(
         caption,
         image,
         mv_image_front=mv_image_front,
@@ -360,17 +409,9 @@ def generation_all(
     print(path)
     print('='*40)
 
-    # tmp_time = time.time()
-    # mesh = floater_remove_worker(mesh)
-    # mesh = degenerate_face_remove_worker(mesh)
-    # logger.info("---Postprocessing takes %s seconds ---" % (time.time() - tmp_time))
-    # stats['time']['postprocessing'] = time.time() - tmp_time
-
     tmp_time = time.time()
     mesh = face_reduce_worker(mesh)
-
-    # path = export_mesh(mesh, save_folder, textured=False, type='glb')
-    path = export_mesh(mesh, save_folder, textured=False, type='obj') # 这样操作也会 core dump
+    path = export_mesh(mesh, save_folder, textured=False, type='obj')
 
     logger.info("---Face Reduction takes %s seconds ---" % (time.time() - tmp_time))
     stats['time']['face reduction'] = time.time() - tmp_time
@@ -378,13 +419,12 @@ def generation_all(
     tmp_time = time.time()
 
     text_path = os.path.join(save_folder, f'textured_mesh.obj')
-    path_textured = tex_pipeline(mesh_path=path, image_path=image, output_mesh_path=text_path, save_glb=False)
+    path_textured = tex_pipeline(mesh_path=path, image_path=processed_img, output_mesh_path=text_path, save_glb=False)
         
     logger.info("---Texture Generation takes %s seconds ---" % (time.time() - tmp_time))
     stats['time']['texture generation'] = time.time() - tmp_time
 
     tmp_time = time.time()
-    # Convert textured OBJ to GLB using obj2gltf with PBR support
     glb_path_textured = os.path.join(save_folder, 'textured_mesh.glb')
     conversion_success = quick_convert_with_obj2gltf(path_textured, glb_path_textured)
 
@@ -402,6 +442,7 @@ def generation_all(
         model_viewer_html_textured,
         stats,
         seed,
+        processed_img,
     )
 
 @spaces.GPU(duration=60)
@@ -421,7 +462,7 @@ def shape_generation(
     randomize_seed: bool = False,
 ):
     start_time_0 = time.time()
-    mesh, image, save_folder, stats, seed = _gen_shape(
+    mesh, processed_img, save_folder, stats, seed = _gen_shape(
         caption,
         image,
         mv_image_front=mv_image_front,
@@ -448,7 +489,9 @@ def shape_generation(
         model_viewer_html,
         stats,
         seed,
+        processed_img,
     )
+
 
 
 def build_app():
@@ -493,14 +536,30 @@ def build_app():
             with gr.Column(scale=3):
                 with gr.Tabs(selected='tab_img_prompt') as tabs_prompt:
                     with gr.Tab('Image Prompt', id='tab_img_prompt', visible=not MV_MODE) as tab_ip:
-                        image = gr.Image(label='Image', type='pil', image_mode='RGBA', height=290)
+                        image = gr.Image(label='Input Image', type='pil', image_mode='RGBA', height=290)
+                        
+                        # Preview button for background removal
+                        with gr.Row():
+                            preview_rembg_btn = gr.Button(
+                                value='👁️ Preview Background Removal', 
+                                variant='secondary', 
+                                size='sm'
+                            )
+                        
+                        rembg_status = gr.Markdown("", visible=True)
+                        
+                        # Processed image display
+                        processed_image = gr.Image(
+                            label='Processed Image (Background Removed)', 
+                            type='pil', 
+                            image_mode='RGBA', 
+                            height=290,
+                            visible=False,
+                            interactive=False
+                        )
                         caption = gr.State(None)
-#                    with gr.Tab('Text Prompt', id='tab_txt_prompt', visible=HAS_T2I and not MV_MODE) as tab_tp:
-#                        caption = gr.Textbox(label='Text Prompt',
-#                                             placeholder='HunyuanDiT will be used to generate image.',
-#                                             info='Example: A 3D model of a cute cat, white background')
+                        
                     with gr.Tab('MultiView Prompt', visible=MV_MODE) as tab_mv:
-                        # gr.Label('Please upload at least one front image.')
                         with gr.Row():
                             mv_image_front = gr.Image(label='Front', type='pil', image_mode='RGBA', height=140,
                                                       min_width=100, elem_classes='mv-image')
@@ -602,9 +661,15 @@ Fast for very complex cases, Standard seldom use.',
                                         label=None, examples_per_page=18)
 
         tab_ip.select(fn=lambda: gr.update(selected='tab_img_gallery'), outputs=gallery)
-        #if HAS_T2I:
-        #    tab_tp.select(fn=lambda: gr.update(selected='tab_txt_gallery'), outputs=gallery)
 
+        # Preview button click handler
+        preview_rembg_btn.click(
+            preview_background_removal,
+            inputs=[image, check_box_rembg],
+            outputs=[processed_image, rembg_status]
+        )
+
+        # Gen Shape button
         btn.click(
             shape_generation,
             inputs=[
@@ -622,16 +687,24 @@ Fast for very complex cases, Standard seldom use.',
                 num_chunks,
                 randomize_seed,
             ],
-            outputs=[file_out, html_gen_mesh, stats, seed]
+            outputs=[file_out, html_gen_mesh, stats, seed, processed_image]
         ).then(
-            lambda: (gr.update(visible=False, value=False), gr.update(interactive=True), gr.update(interactive=True),
-                     gr.update(interactive=False)),
+            lambda img: gr.update(visible=True, value=img) if img else gr.update(visible=False),
+            inputs=[processed_image],
+            outputs=[processed_image]
+        ).then(
+            lambda: gr.update(value="✓ Generation complete!"),
+            outputs=[rembg_status]
+        ).then(
+            lambda: (gr.update(visible=False, value=False), gr.update(interactive=True), 
+                     gr.update(interactive=True), gr.update(interactive=False)),
             outputs=[export_texture, reduce_face, confirm_export, file_export],
         ).then(
             lambda: gr.update(selected='gen_mesh_panel'),
             outputs=[tabs_output],
         )
 
+        # Gen Textured Shape button
         btn_all.click(
             generation_all,
             inputs=[
@@ -649,10 +722,17 @@ Fast for very complex cases, Standard seldom use.',
                 num_chunks,
                 randomize_seed,
             ],
-            outputs=[file_out, file_out2, html_gen_mesh, stats, seed]
+            outputs=[file_out, file_out2, html_gen_mesh, stats, seed, processed_image]
         ).then(
-            lambda: (gr.update(visible=True, value=True), gr.update(interactive=False), gr.update(interactive=True),
-                     gr.update(interactive=False)),
+            lambda img: gr.update(visible=True, value=img) if img else gr.update(visible=False),
+            inputs=[processed_image],
+            outputs=[processed_image]
+        ).then(
+            lambda: gr.update(value="✓ Generation complete!"),
+            outputs=[rembg_status]
+        ).then(
+            lambda: (gr.update(visible=True, value=True), gr.update(interactive=False), 
+                     gr.update(interactive=True), gr.update(interactive=False)),
             outputs=[export_texture, reduce_face, confirm_export, file_export],
         ).then(
             lambda: gr.update(selected='gen_mesh_panel'),
@@ -800,24 +880,12 @@ if __name__ == '__main__':
             except Exception as fix_error:
                 print(f"Warning: Failed to apply torchvision fix: {fix_error}")
             
-            # from hy3dgen.texgen import Hunyuan3DPaintPipeline
-            # texgen_worker = Hunyuan3DPaintPipeline.from_pretrained(args.texgen_model_path)
-            # if args.low_vram_mode:
-            #     texgen_worker.enable_model_cpu_offload()
-
             from hy3dpaint.textureGenPipeline import Hunyuan3DPaintPipeline, Hunyuan3DPaintConfig
             conf = Hunyuan3DPaintConfig(max_num_view=8, resolution=768, device=device_tex)
             conf.realesrgan_ckpt_path = "hy3dpaint/ckpt/RealESRGAN_x4plus.pth"
             conf.multiview_cfg_path = "hy3dpaint/cfgs/hunyuan-paint-pbr.yaml"
             conf.custom_pipeline = "hy3dpaint/hunyuanpaintpbr"
             tex_pipeline = Hunyuan3DPaintPipeline(conf)
-        
-            # Not help much, ignore for now.
-            # if args.compile:
-            #     texgen_worker.models['delight_model'].pipeline.unet.compile()
-            #     texgen_worker.models['delight_model'].pipeline.vae.compile()
-            #     texgen_worker.models['multiview_model'].pipeline.unet.compile()
-            #     texgen_worker.models['multiview_model'].pipeline.vae.compile()
             
             HAS_TEXTUREGEN = True
             
@@ -829,10 +897,9 @@ if __name__ == '__main__':
             print('Please try to install requirements by following README.md')
             HAS_TEXTUREGEN = False
 
-    HAS_T2I = True
+    HAS_T2I = False
     if args.enable_t23d:
         from hy3dgen.text2image import HunyuanDiTPipeline
-
         t2i_worker = HunyuanDiTPipeline('Tencent-Hunyuan/HunyuanDiT-v1.1-Diffusers-Distilled')
         HAS_T2I = True
 
