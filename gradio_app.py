@@ -861,11 +861,20 @@ if __name__ == '__main__':
     if args.device == "xpu" and torch.xpu.is_available():
         num_xpu = torch.xpu.device_count()
         device_shape = torch.device("xpu:0")
-        device_tex = torch.device("xpu:1" if num_xpu > 1 else "xpu:0")
-    else:
-        # fallback for non-XPU mode
+        # Use CPU for texture generation as requested
+        device_tex = torch.device("cpu")
+        print(f"Using XPU for shape generation and CPU for texture generation")
+        print(f"Number of XPU devices available: {num_xpu}")
+    elif args.device and args.device != "xpu":
+        # fallback for other specified devices
         device_shape = torch.device(args.device)
         device_tex = torch.device(args.device)
+        print(f"Using {args.device} for both shape and texture generation")
+    else:
+        # default fallback to CPU if nothing else works
+        device_shape = torch.device("cpu")
+        device_tex = torch.device("cpu")
+        print("Defaulting to CPU for both shape and texture generation")
 
     HAS_TEXTUREGEN = False
     if not args.disable_tex:
