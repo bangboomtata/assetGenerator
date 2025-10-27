@@ -325,12 +325,7 @@ def _gen_shape(
             image = rmbg_worker(image.convert('RGB'))
             time_meta['remove background'] = time.time() - start_time
             
-            # Debug output
-            debug_path = os.path.join(save_folder, 'after_rembg.png')
-            image.save(debug_path)
             print(f"✓ Background removal completed")
-            print(f"✓ Saved debug image to: {debug_path}")
-            print(f"✓ Image mode: {image.mode}, size: {image.size}")
 
     # remove disk io to make responding faster, uncomment at your will.
     # image.save(os.path.join(save_folder, 'rembg.png'))
@@ -363,12 +358,6 @@ def _gen_shape(
     # Get the main image to display (front view for MV mode, or the single image)
     main_image = image if not MV_MODE else image.get('front', list(image.values())[0])
     
-    # Save processed image for debugging
-    debug_path = os.path.join(save_folder, 'processed_input.png')
-    main_image.save(debug_path)
-    print(f"Saved processed image to: {debug_path}")
-    print(f"Processed image mode: {main_image.mode}, size: {main_image.size}")
-    
     return mesh, main_image, save_folder, stats, seed
 
 @spaces.GPU(duration=60)
@@ -386,9 +375,14 @@ def generation_all(
     check_box_rembg=False,
     num_chunks=200000,
     randomize_seed: bool = False,
+    progress=gr.Progress(),  # Add progress parameter
 ):
     start_time_0 = time.time()
-    mesh, processed_img, save_folder, stats, seed = _gen_shape(
+    print(f"[{time.strftime('%H:%M:%S')}] Starting generation_all...")
+    
+    # Shape generation (40% of total progress)
+    progress(0.0, desc="Starting shape generation...")
+    mesh, image, save_folder, stats, seed = _gen_shape(
         caption,
         image,
         mv_image_front=mv_image_front,
@@ -403,48 +397,140 @@ def generation_all(
         num_chunks=num_chunks,
         randomize_seed=randomize_seed,
     )
-    path = export_mesh(mesh, save_folder, textured=False)
+    progress(0.4, desc="Shape generation completed")
+    print(f"[{time.strftime('%H:%M:%S')}] Shape generation completed in {time.time() - start_time_0:.2f}s")
     
+    path = export_mesh(mesh, save_folder, textured=False)
+    print(f"[{time.strftime('%H:%M:%S')}] Mesh exported: {path}")
 
-    print(path)
-    print('='*40)
-
+    # Face reduction (10% of total progress)
+    progress(0.45, desc="Starting face reduction...")
     tmp_time = time.time()
+    print(f"[{time.strftime('%H:%M:%S')}] Starting face reduction...")
     mesh = face_reduce_worker(mesh)
     path = export_mesh(mesh, save_folder, textured=False, type='obj')
+    face_reduction_time = time.time() - tmp_time
+    progress(0.5, desc="Face reduction completed")
+    print(f"[{time.strftime('%H:%M:%S')}] Face reduction completed in {face_reduction_time:.2f}s")
+    logger.info("---Face Reduction takes %s seconds ---" % face_reduction_time)
+    stats['time']['face reduction'] = face_reduction_time
 
-    logger.info("---Face Reduction takes %s seconds ---" % (time.time() - tmp_time))
-    stats['time']['face reduction'] = time.time() - tmp_time
-
+    # Memory cleanup
+    if args.low_vram_mode:
+        progress(0.52, desc="Clearing memory...")
+        print(f"[{time.strftime('%H:%M:%S')}] Clearing XPU memory...")
+        torch.xpu.empty_cache()
+        import gc
+        gc.collect()
+        print(f"[{time.strftime('%H:%M:%S')}] Memory cleared")
+    
+    # Texture generation (35% of total progress)
     tmp_time = time.time()
-
     text_path = os.path.join(save_folder, f'textured_mesh.obj')
-    path_textured = tex_pipeline(mesh_path=path, image_path=processed_img, output_mesh_path=text_path, save_glb=False)
+    
+    progress(0.55, desc="Loading texture pipeline...")
+    print(f"[{time.strftime('%H:%M:%S')}] Starting texture generation pipeline...")
+    
+    # Get texture pipeline (lazy loading)
+    pipeline_load_start = time.time()
+    pipeline = get_texture_pipeline()
+    pipeline_load_time = time.time() - pipeline_load_start
+    
+    if pipeline is None:
+        print(f"[{time.strftime('%H:%M:%S')}] ERROR: Texture pipeline not available")
+        raise gr.Error("Texture pipeline not available")
+    
+    progress(0.65, desc="Texture pipeline loaded")
+    print(f"[{time.strftime('%H:%M:%S')}] Texture pipeline loaded in {pipeline_load_time:.2f}s")
+    
+    try:
+        progress(0.67, desc="Preparing image for texture generation...")
+        print(f"[{time.strftime('%H:%M:%S')}] Preparing image for texture generation...")
         
-    logger.info("---Texture Generation takes %s seconds ---" % (time.time() - tmp_time))
-    stats['time']['texture generation'] = time.time() - tmp_time
+        with torch.no_grad():
+            if hasattr(image, 'cpu'):
+                image_cpu = image.cpu()
+            else:
+                image_cpu = image
+            
+            progress(0.7, desc="Starting texture painting...")
+            print(f"[{time.strftime('%H:%M:%S')}] Image prepared, starting texture painting...")
+            print(f"[{time.strftime('%H:%M:%S')}] Input mesh: {path}")
+            print(f"[{time.strftime('%H:%M:%S')}] Output path: {text_path}")
+            
+            # Call texture pipeline with progress updates
+            texture_start = time.time()
+            
+            # You can add more granular progress updates here if your pipeline supports callbacks
+            progress(0.75, desc="Generating textures... (this may take a while)")
+            path_textured = pipeline(mesh_path=path, image_path=image_cpu, output_mesh_path=text_path, save_glb=False)
+            
+            texture_time = time.time() - texture_start
+            progress(0.85, desc="Texture painting completed")
+            
+            print(f"[{time.strftime('%H:%M:%S')}] Texture painting completed in {texture_time:.2f}s")
+            print(f"[{time.strftime('%H:%M:%S')}] Textured mesh saved to: {path_textured}")
+            
+    except Exception as e:
+        print(f"[{time.strftime('%H:%M:%S')}] ERROR: Texture generation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        if args.low_vram_mode:
+            print(f"[{time.strftime('%H:%M:%S')}] Clearing memory after error...")
+            torch.xpu.empty_cache()
+            import gc
+            gc.collect()
+        raise gr.Error(f"Texture generation failed: {str(e)}")
+    
+    total_texture_time = time.time() - tmp_time
+    print(f"[{time.strftime('%H:%M:%S')}] Total texture generation time: {total_texture_time:.2f}s")
+    logger.info("---Texture Generation takes %s seconds ---" % total_texture_time)
+    stats['time']['texture generation'] = total_texture_time
 
+    # GLB conversion (10% of total progress)
+    progress(0.87, desc="Converting to GLB format...")
     tmp_time = time.time()
+    print(f"[{time.strftime('%H:%M:%S')}] Starting OBJ to GLB conversion...")
+    
     glb_path_textured = os.path.join(save_folder, 'textured_mesh.glb')
     conversion_success = quick_convert_with_obj2gltf(path_textured, glb_path_textured)
-
-    logger.info("---Convert textured OBJ to GLB takes %s seconds ---" % (time.time() - tmp_time))
-    stats['time']['convert textured OBJ to GLB'] = time.time() - tmp_time
-    stats['time']['total'] = time.time() - start_time_0
+    
+    conversion_time = time.time() - tmp_time
+    progress(0.95, desc="GLB conversion completed")
+    print(f"[{time.strftime('%H:%M:%S')}] GLB conversion completed in {conversion_time:.2f}s")
+    logger.info("---Convert textured OBJ to GLB takes %s seconds ---" % conversion_time)
+    stats['time']['convert textured OBJ to GLB'] = conversion_time
+    
+    # Final steps (5% of total progress)
+    progress(0.97, desc="Building model viewer...")
+    print(f"[{time.strftime('%H:%M:%S')}] Building model viewer HTML...")
     model_viewer_html_textured = build_model_viewer_html(save_folder, 
                                                          height=HTML_HEIGHT, 
                                                          width=HTML_WIDTH, textured=True)
+    
     if args.low_vram_mode:
+        print(f"[{time.strftime('%H:%M:%S')}] Final memory cleanup...")
         torch.xpu.empty_cache()
+    
+    total_time = time.time() - start_time_0
+    stats['time']['total'] = total_time
+    
+    progress(1.0, desc="✓ All processing completed!")
+    print(f"[{time.strftime('%H:%M:%S')}] ✓ All processing completed!")
+    print(f"[{time.strftime('%H:%M:%S')}] Total time: {total_time:.2f}s")
+    print(f"[{time.strftime('%H:%M:%S')}] Breakdown:")
+    for key, value in stats['time'].items():
+        print(f"  - {key}: {value:.2f}s")
+    
     return (
         gr.update(value=path),
         gr.update(value=glb_path_textured),
         model_viewer_html_textured,
         stats,
         seed,
-        processed_img,
     )
-
+    
 @spaces.GPU(duration=60)
 def shape_generation(
     caption=None,
@@ -492,7 +578,75 @@ def shape_generation(
         processed_img,
     )
 
+HAS_TEXTUREGEN = False
+tex_pipeline = None
 
+def get_texture_pipeline():
+    global tex_pipeline, HAS_TEXTUREGEN
+    
+    if tex_pipeline is None and not args.disable_tex:
+        try:
+            print(f"[{time.strftime('%H:%M:%S')}] === LAZY LOADING TEXTURE PIPELINE ===")
+            
+            # Apply torchvision compatibility fix for texture generation...
+            print(f"[{time.strftime('%H:%M:%S')}] Applying torchvision compatibility fix...")
+            try:
+                from torchvision_fix import apply_fix
+                fix_result = apply_fix()
+                if not fix_result:
+                    print(f"[{time.strftime('%H:%M:%S')}] Warning: Torchvision fix may not have been applied successfully")
+            except Exception as fix_error:
+                print(f"[{time.strftime('%H:%M:%S')}] Warning: Failed to apply torchvision fix: {fix_error}")
+            
+            # Import texture pipeline components
+            print(f"[{time.strftime('%H:%M:%S')}] Importing texture pipeline components...")
+            from hy3dpaint.textureGenPipeline import Hunyuan3DPaintPipeline, Hunyuan3DPaintConfig
+            
+            # Force CPU usage and clear XPU cache before loading
+            if args.low_vram_mode:
+                print(f"[{time.strftime('%H:%M:%S')}] Clearing XPU cache before loading...")
+                torch.xpu.empty_cache()
+            
+            print(f"[{time.strftime('%H:%M:%S')}] Loading texture pipeline on device: {device_tex}")
+            
+            # Set environment variables to force CPU usage
+            import os
+            os.environ['CUDA_VISIBLE_DEVICES'] = ''  # Hide CUDA devices
+            
+            print(f"[{time.strftime('%H:%M:%S')}] Creating pipeline configuration...")
+            conf = Hunyuan3DPaintConfig(max_num_view=8, resolution=768, device=device_tex)
+            conf.realesrgan_ckpt_path = "hy3dpaint/ckpt/RealESRGAN_x4plus.pth"
+            conf.multiview_cfg_path = "hy3dpaint/cfgs/hunyuan-paint-pbr.yaml"
+            conf.custom_pipeline = "hy3dpaint/hunyuanpaintpbr"
+            
+            # Initialize on CPU
+            print(f"[{time.strftime('%H:%M:%S')}] Initializing texture pipeline...")
+            with torch.no_grad():
+                tex_pipeline = Hunyuan3DPaintPipeline(conf)
+                
+            # Move all models to CPU explicitly
+            print(f"[{time.strftime('%H:%M:%S')}] Moving models to CPU...")
+            if hasattr(tex_pipeline, 'models'):
+                for model_name, model in tex_pipeline.models.items():
+                    print(f"[{time.strftime('%H:%M:%S')}] Moving {model_name} to CPU...")
+                    if hasattr(model, 'to'):
+                        model.to('cpu')
+                    elif hasattr(model, 'pipeline') and hasattr(model.pipeline, 'to'):
+                        model.pipeline.to('cpu')
+    
+            HAS_TEXTUREGEN = True
+            print(f"[{time.strftime('%H:%M:%S')}] ✓ TEXTURE PIPELINE LOADED SUCCESSFULLY ON CPU")
+            
+        except Exception as e:
+            import traceback
+            print(f"[{time.strftime('%H:%M:%S')}] ERROR loading texture generator: {e}")
+            traceback.print_exc()
+            print(f"[{time.strftime('%H:%M:%S')}] Failed to load texture generator.")
+            print(f"[{time.strftime('%H:%M:%S')}] Please try to install requirements by following README.md")
+            HAS_TEXTUREGEN = False
+            tex_pipeline = None
+    
+    return tex_pipeline
 
 def build_app():
     title = 'Hunyuan3D-2: High Resolution Textured 3D Assets Generation'
@@ -857,11 +1011,11 @@ if __name__ == '__main__':
 
     SUPPORTED_FORMATS = ['glb', 'obj', 'ply', 'stl']
 
-    # try to use 2 gpus, 1 for shape gen 1 for texture pipeline
+    # shapegen on xpu texgen on cpu
     if args.device == "xpu" and torch.xpu.is_available():
         num_xpu = torch.xpu.device_count()
         device_shape = torch.device("xpu:0")
-        device_tex = torch.device("xpu:1" if num_xpu > 1 else "xpu:0")
+        device_tex = torch.device("cpu")
     else:
         # fallback for non-XPU mode
         device_shape = torch.device(args.device)
@@ -869,33 +1023,7 @@ if __name__ == '__main__':
 
     HAS_TEXTUREGEN = False
     if not args.disable_tex:
-        try:
-            # Apply torchvision fix before importing basicsr/RealESRGAN
-            print("Applying torchvision compatibility fix for texture generation...")
-            try:
-                from torchvision_fix import apply_fix
-                fix_result = apply_fix()
-                if not fix_result:
-                    print("Warning: Torchvision fix may not have been applied successfully")
-            except Exception as fix_error:
-                print(f"Warning: Failed to apply torchvision fix: {fix_error}")
-            
-            from hy3dpaint.textureGenPipeline import Hunyuan3DPaintPipeline, Hunyuan3DPaintConfig
-            conf = Hunyuan3DPaintConfig(max_num_view=8, resolution=768, device=device_tex)
-            conf.realesrgan_ckpt_path = "hy3dpaint/ckpt/RealESRGAN_x4plus.pth"
-            conf.multiview_cfg_path = "hy3dpaint/cfgs/hunyuan-paint-pbr.yaml"
-            conf.custom_pipeline = "hy3dpaint/hunyuanpaintpbr"
-            tex_pipeline = Hunyuan3DPaintPipeline(conf)
-            
-            HAS_TEXTUREGEN = True
-            
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            print(f"Error loading texture generator: {e}")
-            print("Failed to load texture generator.")
-            print('Please try to install requirements by following README.md')
-            HAS_TEXTUREGEN = False
+        HAS_TEXTUREGEN = True
 
     HAS_T2I = False
     if args.enable_t23d:

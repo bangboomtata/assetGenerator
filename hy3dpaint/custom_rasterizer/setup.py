@@ -3,7 +3,7 @@ from torch.utils.cpp_extension import BuildExtension, CppExtension
 import os
 
 print("=" * 80)
-print("Building Intel XPU SYCL rasterizer (GPU only, with grid_neighbor)...")
+print("Building Intel CPU")
 print("=" * 80)
 
 # Force Intel oneAPI compilers
@@ -12,9 +12,8 @@ os.environ["CC"] = "icx"
 
 # Source files
 sources = [
-    "lib/custom_rasterizer_kernel/dpct_output/rasterizer_gpu_full.dp.cpp",
+    "lib/custom_rasterizer_kernel/rasterizer.cpp",
     "lib/custom_rasterizer_kernel/grid_neighbor.cpp",
-    "lib/custom_rasterizer_kernel/dpct_output/pybind_wrapper.cpp",
 ]
 
 # Compiler flags

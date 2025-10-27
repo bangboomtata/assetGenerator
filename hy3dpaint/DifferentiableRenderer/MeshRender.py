@@ -321,7 +321,7 @@ class MeshRender:
         raster_mode="cr",
         shader_type="face",
         use_opengl=False,
-        device="xpu:1",
+        device="cpu",
     ):
         """
         Initialize mesh renderer with configurable parameters.

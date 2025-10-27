@@ -23,7 +23,7 @@ diffusers_logging.set_verbosity(50)
 
 class Hunyuan3DPaintConfig:
     def __init__(self, max_num_view, resolution, device = None):
-        self.device = device or ("xpu:1" if torch.xpu.is_available() else "cpu")
+        self.device = "cpu"
         self.multiview_cfg_path = "hy3dpaint/cfgs/hunyuan-paint-pbr.yaml"
         self.custom_pipeline = "hunyuanpaintpbr"
         self.multiview_pretrained_path = "tencent/Hunyuan3D-2.1"
