@@ -73,7 +73,7 @@ class Hunyuan3DPaintPipeline:
         # torch.cuda.empty_cache()
         self.models["super_model"] = imageSuperNet(self.config)
         self.models["multiview_model"] = multiviewDiffusionNet(self.config)
-        print("Models Loaded.")
+        print("Texture models Loaded.")
 
     @torch.no_grad()
     def __call__(self, mesh_path=None, image_path=None, output_mesh_path=None, use_remesh=True, save_glb=True):
