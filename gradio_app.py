@@ -26,6 +26,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 import uuid
 import numpy as np
+from multixpu import MultiXPUTextureManager
 
 from hy3dshape.utils import logger
 from hy3dpaint.convert_utils import create_glb_with_pbr_materials
@@ -353,20 +354,43 @@ def generation_all(
 
     # path = export_mesh(mesh, save_folder, textured=False, type='glb')
     path = export_mesh(mesh, save_folder, textured=False, type='obj') # 这样操作也会 core dump
-
+    
     logger.info("---Face Reduction takes %s seconds ---" % (time.time() - tmp_time))
     stats['time']['face reduction'] = time.time() - tmp_time
 
     tmp_time = time.time()
 
     text_path = os.path.join(save_folder, f'textured_mesh.obj')
+
+    # Get texture manager
+    manager = get_texture_pipeline()
+    if manager is None:
+        raise gr.Error("Texture pipeline not available")
+
+    # Submit texture generation task
+    print("Submitting texture generation task...")
+    task_id = manager.submit_task(path, image, text_path)  # Note: image instead of image_path
+
+    # Wait for result
+    print(f"Waiting for texture task {task_id}...")
+    result = manager.get_result(timeout=300)  # 5 minute timeout
+
+    if result is None:
+        raise gr.Error("Texture generation timed out")
+
+    result_task_id, path_textured, processing_time, error = result
+
+    if error:
+        raise gr.Error(f"Texture generation failed: {error}")
+
+    print(f"Texture generation completed in {processing_time:.2f}s")
     
     # Get texture pipeline (lazy loading)
-    pipeline = get_texture_pipeline()
-    if pipeline is None:
-        raise gr.Error("Texture pipeline not available")
+    # pipeline = get_texture_pipeline()
+    # if pipeline is None:
+    #     raise gr.Error("Texture pipeline not available")
     
-    path_textured = pipeline(mesh_path=path, image_path=image, output_mesh_path=text_path, save_glb=False)
+    # path_textured = pipeline(mesh_path=path, image_path=image, output_mesh_path=text_path, save_glb=False)
         
     logger.info("---Texture Generation takes %s seconds ---" % (time.time() - tmp_time))
     stats['time']['texture generation'] = time.time() - tmp_time
@@ -765,20 +789,27 @@ if __name__ == '__main__':
 
     SUPPORTED_FORMATS = ['glb', 'obj', 'ply', 'stl']
 
-    # try to use 2 gpus, 1 for shape gen 1 for texture pipeline
+    # Device setup for multi-XPU
     if args.device == "xpu" and torch.xpu.is_available():
         num_xpu = torch.xpu.device_count()
         device_shape = torch.device("xpu:0")
-        device_tex = torch.device("xpu:1")
+        
+        # Use multiple XPUs for texture generation
+        num_texture_workers = min(2, num_xpu)  # Use up to 2 XPUs for texture
+        device_tex_base = 0  # Start from xpu:0
+        
+        print(f"Using {num_texture_workers} XPUs for texture generation")
     else:
-        # fallback for non-XPU mode
         device_shape = torch.device(args.device)
-        device_tex = torch.device(args.device)
+        num_texture_workers = 1
+        device_tex_base = 0
+    
+    # Initialize multi-XPU texture manager
+    texture_manager = None
 
     # In your main script, after device setup:
     print(f"=== DEVICE SETUP ===")
     print(f"Shape device: {device_shape}")
-    print(f"Texture device: {device_tex}")
     print(f"Current XPU device: {torch.xpu.current_device()}")
     print(f"Available XPU devices: {torch.xpu.device_count()}")
 
@@ -814,15 +845,22 @@ if __name__ == '__main__':
     face_reduce_worker = FaceReducer()
     
     print("=== SHAPE GENERATION MODELS LOADED ===")
+    
+    import torch.multiprocessing as mp
+    try:
+        mp.set_start_method('spawn', force=True)
+        print("Set multiprocessing start method to 'spawn' for XPU compatibility")
+    except RuntimeError as e:
+        print(f"Multiprocessing start method already set: {e}")
 
     # THEN: Set up texture pipeline with lazy loading
     HAS_TEXTUREGEN = False
     tex_pipeline = None
 
     def get_texture_pipeline():
-        global tex_pipeline, HAS_TEXTUREGEN
+        global texture_manager, HAS_TEXTUREGEN
         
-        if tex_pipeline is None and not args.disable_tex:
+        if texture_manager is None and not args.disable_tex:
             try:
                 print("=== LAZY LOADING TEXTURE PIPELINE ===")
                 
@@ -845,20 +883,20 @@ if __name__ == '__main__':
                 current_device = torch.xpu.current_device()
                 print(f"Current device before texture loading: {current_device}")
                 
-                # Import and initialize on texture device
-                from hy3dpaint.textureGenPipeline import Hunyuan3DPaintPipeline, Hunyuan3DPaintConfig
-                
-                with torch.xpu.device(device_tex):
-                    print(f"Loading texture pipeline on device: {device_tex}")
-                    conf = Hunyuan3DPaintConfig(max_num_view=8, resolution=768, device=device_tex)
-                    conf.realesrgan_ckpt_path = "hy3dpaint/ckpt/RealESRGAN_x4plus.pth"
-                    conf.multiview_cfg_path = "hy3dpaint/cfgs/hunyuan-paint-pbr.yaml"
-                    conf.custom_pipeline = "hy3dpaint/hunyuanpaintpbr"
-                    tex_pipeline = Hunyuan3DPaintPipeline(conf)
+                # Clearing XPU:0
+                print("start to reset xpu for texture")
+                import gc
+                torch.xpu.synchronize()
+                gc.collect()
+                torch.xpu.empty_cache()
+                torch.xpu._lazy_init()
+                torch.xpu._xpu_device_context = None
+                gc.collect()
+                torch.xpu.init()
                 
                 # Restore original device
-                torch.xpu.set_device(current_device)
-                print(f"Restored device to: {torch.xpu.current_device()}")
+                # torch.xpu.set_device(current_device)
+                # print(f"Restored device to: {torch.xpu.current_device()}")
         
                 # Not help much, ignore for now.
                 # if args.compile:
@@ -867,19 +905,24 @@ if __name__ == '__main__':
                 #     texgen_worker.models['multiview_model'].pipeline.unet.compile()
                 #     texgen_worker.models['multiview_model'].pipeline.vae.compile()
                 
+                # Initialize multi-XPU manager
+                texture_manager = MultiXPUTextureManager(
+                    num_workers=num_texture_workers,
+                    device_tex_base=device_tex_base
+                )
+                texture_manager.start_workers()
+                
                 HAS_TEXTUREGEN = True
-                print("=== TEXTURE PIPELINE LOADED SUCCESSFULLY ===")
+                print("=== MULTI-XPU TEXTURE MANAGER READY ===")
                 
             except Exception as e:
+                print(f"Failed to initialize texture manager: {e}")
                 import traceback
                 traceback.print_exc()
-                print(f"Error loading texture generator: {e}")
-                print("Failed to load texture generator.")
-                print('Please try to install requirements by following README.md')
                 HAS_TEXTUREGEN = False
-                tex_pipeline = None
+                texture_manager = None
         
-        return tex_pipeline
+        return texture_manager
 
     # Check if texture generation is available (but don't load yet)
     if not args.disable_tex:
@@ -907,3 +950,15 @@ if __name__ == '__main__':
     demo = build_app()
     app = gr.mount_gradio_app(app, demo, path="/")
     uvicorn.run(app, host=args.host, port=args.port)
+    
+    import atexit
+    def cleanup():
+        global texture_manager
+        if texture_manager:
+            texture_manager.shutdown()
+    atexit.register(cleanup)
+    
+    try:
+        uvicorn.run(app, host=args.host, port=args.port)
+    finally:
+        cleanup()

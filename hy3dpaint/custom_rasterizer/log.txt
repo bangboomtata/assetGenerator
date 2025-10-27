@@ -6,8 +6,8 @@ Obtaining file:///home/brian-bong/Hunyuan3D-2.1/hy3dpaint/custom_rasterizer
 Building wheels for collected packages: custom_rasterizer_kernel
   Building editable for custom_rasterizer_kernel (pyproject.toml): started
   Building editable for custom_rasterizer_kernel (pyproject.toml): finished with status 'done'
-  Created wheel for custom_rasterizer_kernel: filename=custom_rasterizer_kernel-0.0.0-0.editable-cp310-cp310-linux_x86_64.whl size=2901 sha256=a5c9a12473c3432940b8e574b17796335043b1cb0d934be4e06503ab6f351f34
-  Stored in directory: /tmp/pip-ephem-wheel-cache-00i9z5p0/wheels/25/8b/c8/649bb69aee758ebb80295695adbb45907dda532b075d0ae6a6
+  Created wheel for custom_rasterizer_kernel: filename=custom_rasterizer_kernel-0.0.0-0.editable-cp310-cp310-linux_x86_64.whl size=2901 sha256=7341f29cc67eba036a709ba28c181d0e75a71762a31436817f31557d399e91fe
+  Stored in directory: /tmp/pip-ephem-wheel-cache-d0tqu9bk/wheels/25/8b/c8/649bb69aee758ebb80295695adbb45907dda532b075d0ae6a6
 Successfully built custom_rasterizer_kernel
 Installing collected packages: custom_rasterizer_kernel
   Attempting uninstall: custom_rasterizer_kernel
