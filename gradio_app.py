@@ -1,23 +1,6 @@
-# Hunyuan 3D is licensed under the TENCENT HUNYUAN NON-COMMERCIAL LICENSE AGREEMENT
-# except for the third-party components listed below.
-# Hunyuan 3D does not impose any additional limitations beyond what is outlined
-# in the repsective licenses of these third-party components.
-# Users must comply with all terms and conditions of original licenses of these third-party
-# components and must ensure that the usage of the third party components adheres to
-# all relevant laws and regulations.
-
-# For avoidance of doubts, Hunyuan 3D means the large language models and
-# their software and algorithms, including trained model weights, parameters (including
-# optimizer states), machine-learning model code, inference-enabling code, training-enabling code,
-# fine-tuning enabling code and other elements of the foregoing made publicly available
-# by Tencent in accordance with TENCENT HUNYUAN COMMUNITY LICENSE AGREEMENT.
-
-# Apply torchvision compatibility fix before other imports
-
 import sys
 sys.path.insert(0, './hy3dshape')
 sys.path.insert(0, './hy3dpaint')
-
 
 try:
     from torchvision_fix import apply_fix
@@ -35,7 +18,6 @@ import subprocess
 import time
 from glob import glob
 from pathlib import Path
-
 import gradio as gr
 import torch
 import trimesh
@@ -378,7 +360,13 @@ def generation_all(
     tmp_time = time.time()
 
     text_path = os.path.join(save_folder, f'textured_mesh.obj')
-    path_textured = tex_pipeline(mesh_path=path, image_path=image, output_mesh_path=text_path, save_glb=False)
+    
+    # Get texture pipeline (lazy loading)
+    pipeline = get_texture_pipeline()
+    if pipeline is None:
+        raise gr.Error("Texture pipeline not available")
+    
+    path_textured = pipeline(mesh_path=path, image_path=image, output_mesh_path=text_path, save_glb=False)
         
     logger.info("---Texture Generation takes %s seconds ---" % (time.time() - tmp_time))
     stats['time']['texture generation'] = time.time() - tmp_time
@@ -403,7 +391,7 @@ def generation_all(
         stats,
         seed,
     )
-
+    
 @spaces.GPU(duration=60)
 def shape_generation(
     caption=None,
@@ -781,66 +769,33 @@ if __name__ == '__main__':
     if args.device == "xpu" and torch.xpu.is_available():
         num_xpu = torch.xpu.device_count()
         device_shape = torch.device("xpu:0")
-        device_tex = torch.device("xpu:1" if num_xpu > 1 else "xpu:0")
+        device_tex = torch.device("xpu:1")
     else:
         # fallback for non-XPU mode
         device_shape = torch.device(args.device)
         device_tex = torch.device(args.device)
 
-    HAS_TEXTUREGEN = False
-    if not args.disable_tex:
-        try:
-            # Apply torchvision fix before importing basicsr/RealESRGAN
-            print("Applying torchvision compatibility fix for texture generation...")
-            try:
-                from torchvision_fix import apply_fix
-                fix_result = apply_fix()
-                if not fix_result:
-                    print("Warning: Torchvision fix may not have been applied successfully")
-            except Exception as fix_error:
-                print(f"Warning: Failed to apply torchvision fix: {fix_error}")
-            
-            # from hy3dgen.texgen import Hunyuan3DPaintPipeline
-            # texgen_worker = Hunyuan3DPaintPipeline.from_pretrained(args.texgen_model_path)
-            # if args.low_vram_mode:
-            #     texgen_worker.enable_model_cpu_offload()
+    # In your main script, after device setup:
+    print(f"=== DEVICE SETUP ===")
+    print(f"Shape device: {device_shape}")
+    print(f"Texture device: {device_tex}")
+    print(f"Current XPU device: {torch.xpu.current_device()}")
+    print(f"Available XPU devices: {torch.xpu.device_count()}")
 
-            from hy3dpaint.textureGenPipeline import Hunyuan3DPaintPipeline, Hunyuan3DPaintConfig
-            conf = Hunyuan3DPaintConfig(max_num_view=8, resolution=768, device=device_tex)
-            conf.realesrgan_ckpt_path = "hy3dpaint/ckpt/RealESRGAN_x4plus.pth"
-            conf.multiview_cfg_path = "hy3dpaint/cfgs/hunyuan-paint-pbr.yaml"
-            conf.custom_pipeline = "hy3dpaint/hunyuanpaintpbr"
-            tex_pipeline = Hunyuan3DPaintPipeline(conf)
-        
-            # Not help much, ignore for now.
-            # if args.compile:
-            #     texgen_worker.models['delight_model'].pipeline.unet.compile()
-            #     texgen_worker.models['delight_model'].pipeline.vae.compile()
-            #     texgen_worker.models['multiview_model'].pipeline.unet.compile()
-            #     texgen_worker.models['multiview_model'].pipeline.vae.compile()
-            
-            HAS_TEXTUREGEN = True
-            
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            print(f"Error loading texture generator: {e}")
-            print("Failed to load texture generator.")
-            print('Please try to install requirements by following README.md')
-            HAS_TEXTUREGEN = False
+    # Before texture config creation:
+    print(f"=== SHAPE CONFIG ===")
+    print(f"Current XPU device: {torch.xpu.current_device()}")
 
-    HAS_T2I = True
-    if args.enable_t23d:
-        from hy3dgen.text2image import HunyuanDiTPipeline
-
-        t2i_worker = HunyuanDiTPipeline('Tencent-Hunyuan/HunyuanDiT-v1.1-Diffusers-Distilled')
-        HAS_T2I = True
-
+    # FIRST: Load shape generation models
+    print("=== LOADING SHAPE GENERATION MODELS FIRST ===")
     from hy3dshape import FaceReducer, FloaterRemover, DegenerateFaceRemover, MeshSimplifier, \
         Hunyuan3DDiTFlowMatchingPipeline
     from hy3dshape.pipelines import export_to_trimesh
     from hy3dshape.rembg import BackgroundRemover
 
+    # Ensure we're on the correct device for shape generation
+    torch.xpu.set_device(device_shape)
+    
     rmbg_worker = BackgroundRemover()
     i23d_worker = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(
         args.model_path,
@@ -857,6 +812,85 @@ if __name__ == '__main__':
     floater_remove_worker = FloaterRemover()
     degenerate_face_remove_worker = DegenerateFaceRemover()
     face_reduce_worker = FaceReducer()
+    
+    print("=== SHAPE GENERATION MODELS LOADED ===")
+
+    # THEN: Set up texture pipeline with lazy loading
+    HAS_TEXTUREGEN = False
+    tex_pipeline = None
+
+    def get_texture_pipeline():
+        global tex_pipeline, HAS_TEXTUREGEN
+        
+        if tex_pipeline is None and not args.disable_tex:
+            try:
+                print("=== LAZY LOADING TEXTURE PIPELINE ===")
+                
+                # Apply torchvision compatibility fix for texture generation...
+                print("Applying torchvision compatibility fix for texture generation...")
+                try:
+                    from torchvision_fix import apply_fix
+                    fix_result = apply_fix()
+                    if not fix_result:
+                        print("Warning: Torchvision fix may not have been applied successfully")
+                except Exception as fix_error:
+                    print(f"Warning: Failed to apply torchvision fix: {fix_error}")
+                
+                # from hy3dgen.texgen import Hunyuan3DPaintPipeline
+                # texgen_worker = Hunyuan3DPaintPipeline.from_pretrained(args.texgen_model_path)
+                # if args.low_vram_mode:
+                #     texgen_worker.enable_model_cpu_offload()
+                
+                # Save current device
+                current_device = torch.xpu.current_device()
+                print(f"Current device before texture loading: {current_device}")
+                
+                # Import and initialize on texture device
+                from hy3dpaint.textureGenPipeline import Hunyuan3DPaintPipeline, Hunyuan3DPaintConfig
+                
+                with torch.xpu.device(device_tex):
+                    print(f"Loading texture pipeline on device: {device_tex}")
+                    conf = Hunyuan3DPaintConfig(max_num_view=8, resolution=768, device=device_tex)
+                    conf.realesrgan_ckpt_path = "hy3dpaint/ckpt/RealESRGAN_x4plus.pth"
+                    conf.multiview_cfg_path = "hy3dpaint/cfgs/hunyuan-paint-pbr.yaml"
+                    conf.custom_pipeline = "hy3dpaint/hunyuanpaintpbr"
+                    tex_pipeline = Hunyuan3DPaintPipeline(conf)
+                
+                # Restore original device
+                torch.xpu.set_device(current_device)
+                print(f"Restored device to: {torch.xpu.current_device()}")
+        
+                # Not help much, ignore for now.
+                # if args.compile:
+                #     texgen_worker.models['delight_model'].pipeline.unet.compile()
+                #     texgen_worker.models['delight_model'].pipeline.vae.compile()
+                #     texgen_worker.models['multiview_model'].pipeline.unet.compile()
+                #     texgen_worker.models['multiview_model'].pipeline.vae.compile()
+                
+                HAS_TEXTUREGEN = True
+                print("=== TEXTURE PIPELINE LOADED SUCCESSFULLY ===")
+                
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                print(f"Error loading texture generator: {e}")
+                print("Failed to load texture generator.")
+                print('Please try to install requirements by following README.md')
+                HAS_TEXTUREGEN = False
+                tex_pipeline = None
+        
+        return tex_pipeline
+
+    # Check if texture generation is available (but don't load yet)
+    if not args.disable_tex:
+        HAS_TEXTUREGEN = True  # We'll try to load it when needed
+
+    HAS_T2I = True
+    if args.enable_t23d:
+        from hy3dgen.text2image import HunyuanDiTPipeline
+
+        t2i_worker = HunyuanDiTPipeline('Tencent-Hunyuan/HunyuanDiT-v1.1-Diffusers-Distilled')
+        HAS_T2I = True
 
     # https://discuss.huggingface.co/t/how-to-serve-an-html-file/33921/2
     # create a FastAPI app

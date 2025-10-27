@@ -23,7 +23,9 @@ diffusers_logging.set_verbosity(50)
 
 class Hunyuan3DPaintConfig:
     def __init__(self, max_num_view, resolution, device = None):
-        self.device = device or ("xpu:1" if torch.xpu.is_available() else "cpu")
+        if torch.xpu.is_available():
+            self.device = device or ("xpu:1" if torch.xpu.is_available() else "cpu")
+        print(f"after init the device is {self.device}")
         self.multiview_cfg_path = "hy3dpaint/cfgs/hunyuan-paint-pbr.yaml"
         self.custom_pipeline = "hunyuanpaintpbr"
         self.multiview_pretrained_path = "tencent/Hunyuan3D-2.1"
@@ -53,9 +55,7 @@ class Hunyuan3DPaintConfig:
             self.candidate_camera_elevs.append(-20)
             self.candidate_view_weights.append(0.01)
 
-
 class Hunyuan3DPaintPipeline:
-
     def __init__(self, config=None) -> None:
         self.config = config if config is not None else Hunyuan3DPaintConfig()
         self.models = {}
@@ -73,7 +73,7 @@ class Hunyuan3DPaintPipeline:
         # torch.cuda.empty_cache()
         self.models["super_model"] = imageSuperNet(self.config)
         self.models["multiview_model"] = multiviewDiffusionNet(self.config)
-        print("Texture models Loaded.")
+        print(f"Texture models loaded with {self.config.device}")
 
     @torch.no_grad()
     def __call__(self, mesh_path=None, image_path=None, output_mesh_path=None, use_remesh=True, save_glb=True):
