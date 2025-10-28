@@ -4,7 +4,6 @@ import random
 import numpy as np
 from PIL import Image
 from typing import List
-import huggingface_hub
 from omegaconf import OmegaConf
 from diffusers import DiffusionPipeline
 from diffusers import EulerAncestralDiscreteScheduler, DDIMScheduler, UniPCMultistepScheduler
@@ -19,17 +18,18 @@ class multiviewDiffusionNet:
         cfg = OmegaConf.load(cfg_path)
         self.cfg = cfg
         self.mode = self.cfg.model.params.stable_diffusion_config.custom_pipeline[2:]
+        config.multiview_pretrained_path = "./"
 
-        model_path = huggingface_hub.snapshot_download(
-            repo_id=config.multiview_pretrained_path,
-            allow_patterns=["hunyuan3d-paintpbr-v2-1/*"],
-        )
-
-        model_path = os.path.join(model_path, "hunyuan3d-paintpbr-v2-1")
+        # Use your local model path - this should point to a directory containing
+        # the standard diffusion model components (unet, vae, text_encoder, etc.)
+        model_path = config.multiview_pretrained_path
+        
+        # Load the pipeline using your custom HunyuanPaintPipeline
         pipeline = DiffusionPipeline.from_pretrained(
             model_path,
-            custom_pipeline=custom_pipeline, 
-            torch_dtype=torch.float16
+            custom_pipeline=custom_pipeline,  # This points to your hunyuanpaintpbr directory
+            torch_dtype=torch.float16,
+            local_files_only=True  # Ensure it only uses local files
         )
 
         pipeline.scheduler = UniPCMultistepScheduler.from_config(pipeline.scheduler.config, timestep_spacing="trailing")
@@ -37,12 +37,8 @@ class multiviewDiffusionNet:
         pipeline.eval()
         setattr(pipeline, "view_size", cfg.model.params.get("view_size", 320))
         
-        # Fix for: “Torch not compiled with CUDA enabled”
-        # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+        # Use CPU as you specified
         self.device = torch.device("cpu")
-        
-        
         self.pipeline = pipeline.to(self.device)
 
         if hasattr(self.pipeline.unet, "use_dino") and self.pipeline.unet.use_dino:
