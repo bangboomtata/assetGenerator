@@ -8,4 +8,4 @@ base_pipeline = DiffusionPipeline.from_pretrained(
 )
 
 # Save it locally
-base_pipeline.save_pretrained("./models/base_model")
+base_pipeline.save_pretrained("./models")

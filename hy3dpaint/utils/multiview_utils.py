@@ -18,12 +18,9 @@ class multiviewDiffusionNet:
         cfg = OmegaConf.load(cfg_path)
         self.cfg = cfg
         self.mode = self.cfg.model.params.stable_diffusion_config.custom_pipeline[2:]
-        config.multiview_pretrained_path = "./"
 
-        # Use your local model path - this should point to a directory containing
-        # the standard diffusion model components (unet, vae, text_encoder, etc.)
-        model_path = config.multiview_pretrained_path
-        
+        model_path = os.path.join(os.path.dirname(__file__), "..", "..", "models")
+               
         # Load the pipeline using your custom HunyuanPaintPipeline
         pipeline = DiffusionPipeline.from_pretrained(
             model_path,
