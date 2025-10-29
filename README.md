@@ -1,3 +1,27 @@
+# Custom Rasterizer Build Guide
+
+This guide explains how to compile and build the **custom rasterizer** (CPU and GPU versions) used in the project.  
+It has been verified to work with **Intel oneAPI 2025.1** and **Python 3.10 (PyTorch environment)**.
+
+---
+
+## 🧩 Prerequisites
+
+Ensure the following are installed before proceeding:
+
+### System Requirements
+- Ubuntu 22.04 (recommended)
+- Python 3.10 (with virtual environment)
+- PyTorch (installed in your virtual environment)
+- Intel oneAPI 2025.1 toolkits
+
+### Install Intel oneAPI 2025.1
+```bash
+sudo apt install intel-oneapi-base-toolkit-2025.1
+sudo apt install intel-oneapi-compiler-dpcpp-cpp-2025.1
+sudo apt install intel-oneapi-dpcpp-ct-2025.1
+
+
 
 <p align="center">
   <img src="assets/images/teaser.jpg">
