@@ -4,6 +4,7 @@ import random
 import numpy as np
 from PIL import Image
 from typing import List
+import huggingface_hub
 from omegaconf import OmegaConf
 from diffusers import DiffusionPipeline
 from diffusers import EulerAncestralDiscreteScheduler, DDIMScheduler, UniPCMultistepScheduler
@@ -19,27 +20,24 @@ class multiviewDiffusionNet:
         self.cfg = cfg
         self.mode = self.cfg.model.params.stable_diffusion_config.custom_pipeline[2:]
 
-        model_path = os.path.join(os.path.dirname(__file__), "..", "..", "models")
-               
-        # Load the pipeline using your custom HunyuanPaintPipeline
+        # model_path = huggingface_hub.snapshot_download(
+        #     repo_id=config.multiview_pretrained_path,
+        #     allow_patterns=["hunyuan3d-paintpbr-v2-1/*"],
+        # )
+        model_path = os.path.expanduser("~/.cache/huggingface/hub/models--tencent--Hunyuan3D-2.1/snapshots/0b94677654c57bb9a6b6845cd7b704ccf551d327/hunyuan3d-paintpbr-v2-1")
         pipeline = DiffusionPipeline.from_pretrained(
             model_path,
-            custom_pipeline=custom_pipeline,  # This points to your hunyuanpaintpbr directory
-            torch_dtype=torch.float16,
-            local_files_only=True  # Ensure it only uses local files
+            custom_pipeline=custom_pipeline, 
+            torch_dtype=torch.float16
         )
 
         pipeline.scheduler = UniPCMultistepScheduler.from_config(pipeline.scheduler.config, timestep_spacing="trailing")
         pipeline.set_progress_bar_config(disable=True)
         pipeline.eval()
         setattr(pipeline, "view_size", cfg.model.params.get("view_size", 320))
-        
-        # Use CPU as you specified
-        self.device = torch.device("cpu")
         self.pipeline = pipeline.to(self.device)
 
         if hasattr(self.pipeline.unet, "use_dino") and self.pipeline.unet.use_dino:
-            from hunyuanpaintpbr.unet.modules import Dino_v2
             self.dino_v2 = Dino_v2(config.dino_ckpt_path).to(torch.float16)
             self.dino_v2 = self.dino_v2.to(self.device)
 
