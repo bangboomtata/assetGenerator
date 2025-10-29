@@ -352,9 +352,9 @@ def generation_all(
     tmp_time = time.time()
     mesh = face_reduce_worker(mesh)
 
-    # path = export_mesh(mesh, save_folder, textured=False, type='glb')
-    path = export_mesh(mesh, save_folder, textured=False, type='obj') # 这样操作也会 core dump
-    
+    path = export_mesh(mesh, save_folder, textured=False, type='glb')
+    # path = export_mesh(mesh, save_folder, textured=False, type='obj') # 这样操作也会 core dump
+
     logger.info("---Face Reduction takes %s seconds ---" % (time.time() - tmp_time))
     stats['time']['face reduction'] = time.time() - tmp_time
 
@@ -792,13 +792,9 @@ if __name__ == '__main__':
     # Device setup for multi-XPU
     if args.device == "xpu" and torch.xpu.is_available():
         num_xpu = torch.xpu.device_count()
-        device_shape = torch.device("xpu:0")
-        
-        # Use multiple XPUs for texture generation
-        num_texture_workers = min(2, num_xpu)  # Use up to 2 XPUs for texture
-        device_tex_base = 0  # Start from xpu:0
-        
-        print(f"Using {num_texture_workers} XPUs for texture generation")
+        device_shape = torch.device("xpu:1")
+        device_tex = torch.device("xpu:0")
+        print("Using XPU")
     else:
         device_shape = torch.device(args.device)
         num_texture_workers = 1
@@ -894,7 +890,7 @@ if __name__ == '__main__':
                 gc.collect()
                 torch.xpu.init()
                 
-                # Restore original device
+                # # Restore original device
                 # torch.xpu.set_device(current_device)
                 # print(f"Restored device to: {torch.xpu.current_device()}")
         
